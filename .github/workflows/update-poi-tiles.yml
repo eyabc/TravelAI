@@ -50,6 +50,7 @@ jobs:
 
       - name: Copy new tiles to branch
         run: |
+          mkdir ./tiles
           cp -r /tmp/tiles ./tiles
 
       - name: Commit and push tiles
