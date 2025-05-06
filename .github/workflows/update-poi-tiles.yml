@@ -47,8 +47,15 @@ jobs:
         run: |
           git fetch origin poi-tiles || true
           git checkout poi-tiles || git checkout --orphan poi-tiles
-          git rm -rf ./* ./.??* 2>/dev/null
-          git clean -fdx
+      
+          # 안전하게 모든 파일 삭제 (.git은 제외)
+          find . -mindepth 1 -not -name '.git' -exec rm -rf {} +
+      
+          # 작업 디렉토리가 비었는지 확인
+          echo "Current directory contents:"
+          ls -la
+
+  
 
       - name: Copy new tiles to branch
         run: |
