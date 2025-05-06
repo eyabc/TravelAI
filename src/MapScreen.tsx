@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { View, StyleSheet, Dimensions, Alert, Platform, PermissionsAndroid, TouchableOpacity, Text, FlatList, ActivityIndicator, Modal, Animated, Linking } from 'react-native';
+import { View, StyleSheet, Dimensions, Alert, Platform, PermissionsAndroid, TouchableOpacity, Text, FlatList, ActivityIndicator, Modal, Animated, Linking, TextInput } from 'react-native';
 import MapView, { Marker, Region, UrlTile } from 'react-native-maps';
 import Geolocation from '@react-native-community/geolocation';
 import Ionicons from 'react-native-vector-icons/Ionicons';
@@ -22,6 +22,19 @@ interface Museum {
 const LABEL_TILE = "http://c.tile.openstreetmap.org/{z}/{x}/{y}.png";
 const NO_LABEL_TILE = "https://cartodb-basemaps-a.global.ssl.fastly.net/light_nolabels/{z}/{x}/{y}.png";
 
+// Haversine 거리 계산 함수 추가
+function getDistanceFromLatLonInKm(lat1: number, lon1: number, lat2: number, lon2: number) {
+  const R = 6371; // km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
 const MapScreen = () => {
   const [region, setRegion] = useState<Region>({
     latitude: 37.523984,
@@ -31,7 +44,11 @@ const MapScreen = () => {
   });
   const [currentLocation, setCurrentLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [museums, setMuseums] = useState<Museum[]>([]);
+  const [displayedMuseums, setDisplayedMuseums] = useState<Museum[]>([]); // 표시할 박물관 목록
+  const [page, setPage] = useState(1); // 현재 페이지
+  const [hasMore, setHasMore] = useState(true); // 더 불러올 데이터가 있는지
   const [loadingMuseums, setLoadingMuseums] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false); // 추가 로딩 상태
   const [showLabels, setShowLabels] = useState(true);
   const mapRef = useRef<MapView>(null);
   const [currentScale, setCurrentScale] = useState(region.latitudeDelta);
@@ -39,6 +56,10 @@ const MapScreen = () => {
   const [ticker, setTicker] = useState<string | null>(null);
   const tickerAnim = useRef(new Animated.Value(0)).current;
   const [webviewUrl, setWebviewUrl] = useState<string | null>(null);
+  const [searchText, setSearchText] = useState('');
+  const [lastSearchTime, setLastSearchTime] = useState<number>(0);
+  const searchCache = useRef<{[key: string]: {data: Museum[], timestamp: number}}>({});
+  const CACHE_DURATION = 5 * 60 * 1000; // 5분 캐시
 
   // latitudeDelta -> zoom level 변환 함수
   const getZoomLevel = (latDelta: number) => {
@@ -46,6 +67,23 @@ const MapScreen = () => {
     return Math.round(Math.log2(360 / latDelta));
   };
   const [zoomLevel, setZoomLevel] = useState(getZoomLevel(region.latitudeDelta));
+
+  // 캐시된 데이터 가져오기
+  const getCachedData = (key: string) => {
+    const cached = searchCache.current[key];
+    if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
+      return cached.data;
+    }
+    return null;
+  };
+
+  // 데이터 캐시하기
+  const cacheData = (key: string, data: Museum[]) => {
+    searchCache.current[key] = {
+      data,
+      timestamp: Date.now()
+    };
+  };
 
   useEffect(() => {
     const requestLocationPermission = async () => {
@@ -105,33 +143,28 @@ const MapScreen = () => {
     };
   };
 
-  // Overpass API로 박물관/미술관/기념관/유적지 등 검색
-  const fetchMuseums = async (region: Region) => {
+  // Overpass API로 박물관/미술관/기념관/유적지 등 검색 (지도 범위)
+  const fetchMuseumsInRegion = async (region: Region) => {
     setLoadingMuseums(true);
+    setPage(1);
+    const cacheKey = `bbox_${region.latitude.toFixed(3)}_${region.longitude.toFixed(3)}_${region.latitudeDelta.toFixed(3)}_${region.longitudeDelta.toFixed(3)}`;
+    const cachedData = getCachedData(cacheKey);
+    if (cachedData) {
+      setMuseums(cachedData);
+      setDisplayedMuseums(cachedData.slice(0, 10));
+      setHasMore(cachedData.length > 10);
+      setLoadingMuseums(false);
+      return;
+    }
+    // 지도 범위(bbox)로 쿼리 제한
     const bbox = getBoundingBox(region);
     const query = `
       [out:json][timeout:25];
       (
-        node["tourism"="museum"](${bbox.s},${bbox.w},${bbox.n},${bbox.e});
-        way["tourism"="museum"](${bbox.s},${bbox.w},${bbox.n},${bbox.e});
-        relation["tourism"="museum"](${bbox.s},${bbox.w},${bbox.n},${bbox.e});
-        node["tourism"="art_gallery"](${bbox.s},${bbox.w},${bbox.n},${bbox.e});
-        way["tourism"="art_gallery"](${bbox.s},${bbox.w},${bbox.n},${bbox.e});
-        relation["tourism"="art_gallery"](${bbox.s},${bbox.w},${bbox.n},${bbox.e});
-        node["historic"="memorial"](${bbox.s},${bbox.w},${bbox.n},${bbox.e});
-        way["historic"="memorial"](${bbox.s},${bbox.w},${bbox.n},${bbox.e});
-        relation["historic"="memorial"](${bbox.s},${bbox.w},${bbox.n},${bbox.e});
-        node["historic"="archaeological_site"](${bbox.s},${bbox.w},${bbox.n},${bbox.e});
-        way["historic"="archaeological_site"](${bbox.s},${bbox.w},${bbox.n},${bbox.e});
-        relation["historic"="archaeological_site"](${bbox.s},${bbox.w},${bbox.n},${bbox.e});
-        node["historic"="monument"](${bbox.s},${bbox.w},${bbox.n},${bbox.e});
-        way["historic"="monument"](${bbox.s},${bbox.w},${bbox.n},${bbox.e});
-        relation["historic"="monument"](${bbox.s},${bbox.w},${bbox.n},${bbox.e});
-        node["historic"="yes"](${bbox.s},${bbox.w},${bbox.n},${bbox.e});
-        way["historic"="yes"](${bbox.s},${bbox.w},${bbox.n},${bbox.e});
-        relation["historic"="yes"](${bbox.s},${bbox.w},${bbox.n},${bbox.e});
+        nwr["tourism"~"museum|art_gallery"](${bbox.s},${bbox.w},${bbox.n},${bbox.e});
+        nwr["historic"~"memorial|archaeological_site|monument|yes"](${bbox.s},${bbox.w},${bbox.n},${bbox.e});
       );
-      out center tags;
+      out center tags 100;
     `;
     try {
       const response = await fetch('https://overpass-api.de/api/interpreter', {
@@ -139,17 +172,88 @@ const MapScreen = () => {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: `data=${encodeURIComponent(query)}`,
       });
+      if (!response.ok) throw new Error('API 요청 실패');
       const json = await response.json();
-      const museums: Museum[] = (json.elements || []).map((el: any) => ({
-        id: String(el.id),
-        name: el.tags?.name || '이름 없음',
-        lat: el.lat || el.center?.lat,
-        lon: el.lon || el.center?.lon,
-        address: el.tags?.['addr:full'] || el.tags?.['addr:street'] || '',
-      })).filter((m: Museum) => m.lat && m.lon);
+      const uniqueMuseums = new Map<string, Museum>();
+      (json.elements || []).forEach((el: any) => {
+        if (!el.lat || !el.lon) return;
+        const key = `${el.lat}_${el.lon}`;
+        if (!uniqueMuseums.has(key)) {
+          uniqueMuseums.set(key, {
+            id: String(el.id),
+            name: el.tags?.name || '이름 없음',
+            lat: el.lat || el.center?.lat,
+            lon: el.lon || el.center?.lon,
+            address: el.tags?.['addr:full'] || el.tags?.['addr:street'] || '',
+          });
+        }
+      });
+      const museums = Array.from(uniqueMuseums.values());
+      cacheData(cacheKey, museums);
       setMuseums(museums);
+      setDisplayedMuseums(museums.slice(0, 10));
+      setHasMore(museums.length > 10);
     } catch (e) {
       setMuseums([]);
+      setDisplayedMuseums([]);
+      setHasMore(false);
+    } finally {
+      setLoadingMuseums(false);
+    }
+  };
+
+  // 이름으로 전역 검색 (기존 fetchMuseums)
+  const fetchMuseumsByName = async (name: string) => {
+    setLoadingMuseums(true);
+    setPage(1);
+    const cacheKey = `name_${name}`;
+    const cachedData = getCachedData(cacheKey);
+    if (cachedData) {
+      setMuseums(cachedData);
+      setDisplayedMuseums(cachedData.slice(0, 10));
+      setHasMore(cachedData.length > 10);
+      setLoadingMuseums(false);
+      return;
+    }
+    const query = `
+      [out:json][timeout:25];
+      (
+        nwr["tourism"~"museum|art_gallery"]["name"~"${name}",i];
+        nwr["historic"~"memorial|archaeological_site|monument|yes"]["name"~"${name}",i];
+      );
+      out center tags 100;
+    `;
+    try {
+      const response = await fetch('https://overpass-api.de/api/interpreter', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `data=${encodeURIComponent(query)}`,
+      });
+      if (!response.ok) throw new Error('API 요청 실패');
+      const json = await response.json();
+      const uniqueMuseums = new Map<string, Museum>();
+      (json.elements || []).forEach((el: any) => {
+        if (!el.lat || !el.lon) return;
+        const key = `${el.lat}_${el.lon}`;
+        if (!uniqueMuseums.has(key)) {
+          uniqueMuseums.set(key, {
+            id: String(el.id),
+            name: el.tags?.name || '이름 없음',
+            lat: el.lat || el.center?.lat,
+            lon: el.lon || el.center?.lon,
+            address: el.tags?.['addr:full'] || el.tags?.['addr:street'] || '',
+          });
+        }
+      });
+      const museums = Array.from(uniqueMuseums.values());
+      cacheData(cacheKey, museums);
+      setMuseums(museums);
+      setDisplayedMuseums(museums.slice(0, 10));
+      setHasMore(museums.length > 10);
+    } catch (e) {
+      setMuseums([]);
+      setDisplayedMuseums([]);
+      setHasMore(false);
     } finally {
       setLoadingMuseums(false);
     }
@@ -160,11 +264,40 @@ const MapScreen = () => {
     setRegion(reg);
     const zl = getZoomLevel(reg.latitudeDelta);
     setZoomLevel(zl);
-    if (zl >= 13) {
-      fetchMuseums(reg);
-    } else {
-      setMuseums([]); // 줌 레벨이 낮으면 박물관 마커/리스트 모두 숨김
+    // 이름 검색이 비어있을 때만 지도범위 검색
+    if (zl >= 13 && searchText.trim() === '') {
+      fetchMuseumsInRegion(reg);
+    } else if (zl < 13) {
+      setMuseums([]);
+      setDisplayedMuseums([]);
     }
+  };
+
+  // 이름 검색 입력 시 전역 검색
+  useEffect(() => {
+    if (searchText.trim() !== '') {
+      fetchMuseumsByName(searchText.trim());
+    } else {
+      // 검색어가 비어있으면 현재 region 기준으로 지도범위 검색
+      fetchMuseumsInRegion(region);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchText]);
+
+  // 더 많은 결과 로드
+  const loadMore = () => {
+    if (loadingMore || !hasMore) return;
+    
+    setLoadingMore(true);
+    const nextPage = page + 1;
+    const start = 0;
+    const end = nextPage * 10;
+    const newMuseums = museums.slice(start, end);
+    
+    setDisplayedMuseums(newMuseums);
+    setPage(nextPage);
+    setHasMore(end < museums.length);
+    setLoadingMore(false);
   };
 
   // 박물관 마커 클릭 시 ticker 표시
@@ -212,8 +345,28 @@ const MapScreen = () => {
     }
   };
 
+  // 필터링된 장소 리스트 (displayedMuseums 사용)
+  const filteredMuseums = displayedMuseums.filter(m =>
+    m.name.toLowerCase().includes(searchText.trim().toLowerCase())
+  );
+
   return (
     <View style={styles.container}>
+      {/* 상단 검색창 */}
+      <View style={styles.searchBarContainer}>
+        <TextInput
+          style={styles.searchBar}
+          placeholder="이름으로 검색..."
+          value={searchText}
+          onChangeText={setSearchText}
+          clearButtonMode="while-editing"
+        />
+        {searchText.length > 0 && (
+          <TouchableOpacity style={styles.clearBtn} onPress={() => setSearchText('')}>
+            <Text style={styles.clearBtnText}>✕</Text>
+          </TouchableOpacity>
+        )}
+      </View>
       <MapView
         ref={mapRef}
         style={styles.map}
@@ -238,7 +391,7 @@ const MapScreen = () => {
             onPress={() => Alert.alert('현재 위치', '여기에 있습니다.')}
           />
         )}
-        {museums.map((museum) => (
+        {filteredMuseums.map((museum) => (
           <Marker
             key={museum.id}
             coordinate={{ latitude: museum.lat, longitude: museum.lon }}
@@ -270,37 +423,57 @@ const MapScreen = () => {
         {loadingMuseums ? (
           <ActivityIndicator size="small" color="#007AFF" style={{ margin: 10 }} />
         ) : (
-          <FlatList
-            data={museums}
-            keyExtractor={item => item.id}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={styles.museumList}
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                style={styles.museumItem}
-                onPress={() => {
-                  if (mapRef.current) {
-                    mapRef.current.animateToRegion({
-                      latitude: item.lat,
-                      longitude: item.lon,
-                      latitudeDelta: region.latitudeDelta,
-                      longitudeDelta: region.longitudeDelta,
-                    }, 500);
-                  }
-                  handleMuseumMarkerPress(item);
-                }}
-              >
-                <Text style={styles.museumName}>{item.name}</Text>
-              </TouchableOpacity>
-            )}
-          />
+          filteredMuseums.length === 0 ? (
+            <View style={styles.noResultContainer}>
+              <Text style={styles.noResultText}>검색 결과가 없습니다.</Text>
+            </View>
+          ) : (
+            <FlatList
+              data={filteredMuseums}
+              keyExtractor={item => item.id}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.museumList}
+              onEndReached={loadMore}
+              onEndReachedThreshold={0.5}
+              ListFooterComponent={() => (
+                loadingMore ? (
+                  <ActivityIndicator size="small" color="#007AFF" style={{ margin: 10 }} />
+                ) : hasMore ? (
+                  <TouchableOpacity
+                    style={[styles.museumItem, styles.loadMoreButton]}
+                    onPress={loadMore}
+                  >
+                    <Text style={styles.loadMoreText}>더 보기</Text>
+                  </TouchableOpacity>
+                ) : null
+              )}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={styles.museumItem}
+                  onPress={() => {
+                    if (mapRef.current) {
+                      mapRef.current.animateToRegion({
+                        latitude: item.lat,
+                        longitude: item.lon,
+                        latitudeDelta: region.latitudeDelta,
+                        longitudeDelta: region.longitudeDelta,
+                      }, 500);
+                    }
+                    handleMuseumMarkerPress(item);
+                  }}
+                >
+                  <Text style={styles.museumName}>{item.name}</Text>
+                </TouchableOpacity>
+              )}
+            />
+          )
         )}
       </View>
       <View style={styles.zoomInfo}>
         <Text style={styles.zoomText}>줌 레벨: {zoomLevel}</Text>
       </View>
-      {museums.length > 0 && (
+      {filteredMuseums.length > 0 && (
         <View style={styles.listButtonContainer}>
           <TouchableOpacity style={styles.listButton} onPress={() => setShowList(true)}>
             <Text style={styles.listButtonText}>📋 목록보기</Text>
@@ -320,11 +493,11 @@ const MapScreen = () => {
             </TouchableOpacity>
             {loadingMuseums ? (
               <ActivityIndicator size="small" color="#007AFF" style={{ margin: 10 }} />
-            ) : museums.length === 0 ? (
-              <Text style={{ textAlign: 'center', color: '#888', margin: 20 }}>박물관이 없습니다.</Text>
+            ) : filteredMuseums.length === 0 ? (
+              <Text style={{ textAlign: 'center', color: '#888', margin: 20 }}>검색 결과가 없습니다.</Text>
             ) : (
               <FlatList
-                data={museums}
+                data={filteredMuseums}
                 keyExtractor={item => item.id}
                 renderItem={({ item }) => (
                   <TouchableOpacity
@@ -603,6 +776,61 @@ const styles = StyleSheet.create({
     color: '#007AFF',
     fontWeight: 'bold',
     fontSize: 16,
+  },
+  searchBarContainer: {
+    position: 'absolute',
+    top: 44,
+    left: 18,
+    right: 18,
+    zIndex: 30,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  searchBar: {
+    flex: 1,
+    fontSize: 16,
+    color: '#222',
+    backgroundColor: 'transparent',
+    borderWidth: 0,
+    paddingVertical: 4,
+    paddingHorizontal: 0,
+  },
+  clearBtn: {
+    marginLeft: 6,
+    padding: 4,
+  },
+  clearBtnText: {
+    fontSize: 18,
+    color: '#888',
+  },
+  loadMoreButton: {
+    backgroundColor: '#007AFF',
+    marginLeft: 8,
+  },
+  loadMoreText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 15,
+  },
+  noResultContainer: {
+    minHeight: 60,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+  },
+  noResultText: {
+    color: '#888',
+    fontSize: 15,
+    fontWeight: 'bold',
   },
 });
 
