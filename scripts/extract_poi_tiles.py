@@ -1,41 +1,57 @@
-import sys
-import os
-import xml.etree.ElementTree as ET
-import json
+name: Update POI Tiles
 
-if len(sys.argv) < 3:
-    print("Usage: python extract_poi_tiles.py <input.osm> <output_dir>")
-    sys.exit(1)
+on:
+  schedule:
+    - cron: '0 0 * * 1'  # 매주 월요일 0시(UTC)
+  workflow_dispatch:
 
-input_file = sys.argv[1]
-output_dir = sys.argv[2]
-os.makedirs(output_dir, exist_ok=True)
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main branch
+        uses: actions/checkout@v3
+        with:
+          ref: main
+          fetch-depth: 0
 
-tree = ET.parse(input_file)
-root = tree.getroot()
+      - name: Set up Python and tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget osmctools python3 python3-pip
+          pip3 install lxml
 
-tile_size = 0.1
-tiles = {}
+      - name: Download OSM extract
+        run: |
+          wget http://download.geofabrik.de/asia/south-korea-latest.osm.pbf -O korea-latest.osm.pbf
 
-for node in root.findall('node'):
-    lat = float(node.attrib['lat'])
-    lon = float(node.attrib['lon'])
-    tags = {tag.attrib['k']: tag.attrib['v'] for tag in node.findall('tag')}
-    if not tags.get('name'):
-        continue
-    tile_lat = round(lat * 10) / 10
-    tile_lon = round(lon * 10) / 10
-    tile_key = f'{tile_lat:.1f}_{tile_lon:.1f}'
-    poi = {
-        'id': node.attrib['id'],
-        'lat': lat,
-        'lon': lon,
-        'name': tags.get('name', ''),
-        'type': tags.get('tourism', tags.get('historic', '')),
-        'address': tags.get('addr:full', tags.get('addr:street', ''))
-    }
-    tiles.setdefault(tile_key, []).append(poi)
+      - name: Convert to OSM XML
+        run: |
+          osmconvert korea-latest.osm.pbf -o=korea-latest.osm
 
-for tile_key, pois in tiles.items():
-    with open(os.path.join(output_dir, f'{tile_key}.json'), 'w', encoding='utf-8') as f:
-        json.dump(pois, f, ensure_ascii=False)
+      - name: Filter POI (박물관/미술관/기념관/유적지)
+        run: |
+          osmfilter korea-latest.osm --keep="tourism=museum =art_gallery historic=memorial =archaeological_site =monument =yes" --ignore-dependencies -o=poi_museums.osm
+
+      - name: Extract and split POI to tiles
+        run: |
+          python3 scripts/extract_poi_tiles.py poi_museums.osm tiles
+
+      - name: Checkout poi-tiles branch (or create if not exists)
+        run: |
+          git fetch origin poi-tiles || true
+          git checkout poi-tiles || git checkout --orphan poi-tiles
+          git rm -rf .
+          git clean -fdx
+
+      - name: Copy new tiles to branch
+        run: |
+          cp -r $GITHUB_WORKSPACE/tiles ./tiles
+          git add tiles/
+
+      - name: Commit and push tiles
+        run: |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+          git commit -m "자동 업데이트: 최신 OSM POI 타일 데이터" || echo "No changes to commit"
+          git push origin poi-tiles
