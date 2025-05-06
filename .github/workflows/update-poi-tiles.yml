@@ -1,0 +1,57 @@
+name: Update POI Tiles
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'  # 매 15분마다 실행 (UTC 기준)
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main branch
+        uses: actions/checkout@v3
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Set up Python and tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y wget osmctools python3 python3-pip
+          pip3 install lxml
+
+      - name: Download OSM extract
+        run: |
+          wget http://download.geofabrik.de/asia/south-korea-latest.osm.pbf -O korea-latest.osm.pbf
+
+      - name: Convert to OSM XML
+        run: |
+          osmconvert korea-latest.osm.pbf -o=korea-latest.osm
+
+      - name: Filter POI (박물관/미술관/기념관/유적지)
+        run: |
+          osmfilter korea-latest.osm --keep="tourism=museum =art_gallery historic=memorial =archaeological_site =monument =yes" --ignore-dependencies -o=poi_museums.osm
+
+      - name: Extract and split POI to tiles
+        run: |
+          python3 scripts/extract_poi_tiles.py poi_museums.osm tiles
+
+      - name: Checkout tiles branch (or create if not exists)
+        run: |
+          git fetch origin tiles || true
+          git checkout tiles || git checkout --orphan tiles
+          git rm -rf .
+          git clean -fdx
+
+      - name: Copy new tiles to branch
+        run: |
+          cp -r $GITHUB_WORKSPACE/tiles ./tiles
+          git add tiles/
+
+      - name: Commit and push tiles
+        run: |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+          git commit -m "자동 업데이트: 최신 OSM POI 타일 데이터" || echo "No changes to commit"
+          git push origin tiles
