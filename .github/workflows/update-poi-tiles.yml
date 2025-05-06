@@ -37,6 +37,10 @@ jobs:
         run: |
           python3 scripts/extract_poi_tiles.py poi_museums.osm tiles
 
+      - name: Move tiles to temp
+        run: |
+          mv tiles /tmp/tiles
+
       - name: Checkout poi-tiles branch (or create if not exists)
         run: |
           git fetch origin poi-tiles || true
@@ -46,8 +50,7 @@ jobs:
 
       - name: Copy new tiles to branch
         run: |
-          cp -r $GITHUB_WORKSPACE/tiles ./tiles
-          git add tiles/
+          cp -r /tmp/tiles ./tiles
 
       - name: Commit and push tiles
         run: |
