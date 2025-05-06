@@ -2,14 +2,15 @@ name: Update POI Tiles
 
 on:
   schedule:
-    - cron: '0 0 * * 1'  # 매주 월요일 0시(UTC)
+    - cron: '0/15 * * * *'  # 매주 월요일 0시(UTC)
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # 👉 push 하기 위해 write 권한 필요
+      contents: write
+
     steps:
       - name: Checkout main branch
         uses: actions/checkout@v3
@@ -20,7 +21,7 @@ jobs:
       - name: Set up Python and tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y wget osmctools python3 python3-pip
+          sudo apt-get install -y wget osmctools python3 python3-pip tree
           pip3 install lxml
 
       - name: Download OSM extract
@@ -33,7 +34,9 @@ jobs:
 
       - name: Filter POI (박물관/미술관/기념관/유적지)
         run: |
-          osmfilter korea-latest.osm --keep="tourism=museum =art_gallery historic=memorial =archaeological_site =monument =yes" --ignore-dependencies -o=poi_museums.osm
+          osmfilter korea-latest.osm \
+            --keep="tourism=museum =art_gallery historic=memorial =archaeological_site =monument =yes" \
+            --ignore-dependencies -o=poi_museums.osm
 
       - name: Extract and split POI to tiles
         run: |
@@ -47,23 +50,33 @@ jobs:
         run: |
           git fetch origin poi-tiles || true
           git checkout poi-tiles || git checkout --orphan poi-tiles
-      
-          # 안전하게 모든 파일 삭제 (.git은 제외)
-          find . -mindepth 1 -not -name '.git' -not -path './.git/*' -exec rm -rf {} +
-      
-          # 작업 디렉토리가 비었는지 확인
-          echo "Current directory contents:"
-          ls -la
 
-  
+          # 안전하게 .git 제외하고 모두 삭제
+          find . -mindepth 1 -not -name '.git' -not -path './.git/*' -exec rm -rf {} +
+          echo "✅ poi-tiles 브랜치 클린 완료"
+          ls -la
 
       - name: Copy new tiles to branch
         run: |
           cp -r /tmp/tiles ./tiles
-          
+          echo "✅ tiles 복사 완료"
+          tree ./tiles || ls -R ./tiles
+
       - name: Commit and push tiles
         run: |
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git config --global user.name "github-actions[bot]"
-          git commit -m "자동 업데이트: 최신 OSM POI 타일 데이터" || echo "No changes to commit"
-          git push origin poi-tiles
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+
+          git add .
+
+          echo "👉 git status:"
+          git status
+          echo "👉 staged files:"
+          git diff --cached --name-status
+
+          if git diff --cached --quiet; then
+            echo "✅ 변경사항 없음. 커밋 생략"
+          else
+            git commit -m "자동 업데이트: 최신 OSM POI 타일 데이터"
+            git push origin HEAD:poi-tiles
+          fi
