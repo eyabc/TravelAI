@@ -143,11 +143,12 @@ const MapScreen = () => {
     };
   };
 
-  // Overpass API로 박물관/미술관/기념관/유적지 등 검색 (지도 범위)
-  const fetchMuseumsInRegion = async (region: Region) => {
+  // MAPS.ME 스타일: 지도 범위 내에서만 검색, 결과 없으면 bbox 확장
+  const fetchMuseumsInRegion = async (region: Region, nameFilter: string = '', expandCount: number = 0) => {
     setLoadingMuseums(true);
     setPage(1);
-    const cacheKey = `bbox_${region.latitude.toFixed(3)}_${region.longitude.toFixed(3)}_${region.latitudeDelta.toFixed(3)}_${region.longitudeDelta.toFixed(3)}`;
+    // bbox + nameFilter로 캐시 키 생성
+    const cacheKey = `bbox_${region.latitude.toFixed(3)}_${region.longitude.toFixed(3)}_${region.latitudeDelta.toFixed(3)}_${region.longitudeDelta.toFixed(3)}_${nameFilter}`;
     const cachedData = getCachedData(cacheKey);
     if (cachedData) {
       setMuseums(cachedData);
@@ -156,13 +157,14 @@ const MapScreen = () => {
       setLoadingMuseums(false);
       return;
     }
-    // 지도 범위(bbox)로 쿼리 제한
+    // 지도 범위(bbox)로 쿼리 제한, 이름 필터 적용
     const bbox = getBoundingBox(region);
+    const nameQuery = nameFilter ? `["name"~"${nameFilter}",i]` : '';
     const query = `
       [out:json][timeout:25];
       (
-        nwr["tourism"~"museum|art_gallery"](${bbox.s},${bbox.w},${bbox.n},${bbox.e});
-        nwr["historic"~"memorial|archaeological_site|monument|yes"](${bbox.s},${bbox.w},${bbox.n},${bbox.e});
+        nwr["tourism"~"museum|art_gallery"]${nameQuery}(${bbox.s},${bbox.w},${bbox.n},${bbox.e});
+        nwr["historic"~"memorial|archaeological_site|monument|yes"]${nameQuery}(${bbox.s},${bbox.w},${bbox.n},${bbox.e});
       );
       out center tags 100;
     `;
@@ -189,63 +191,16 @@ const MapScreen = () => {
         }
       });
       const museums = Array.from(uniqueMuseums.values());
-      cacheData(cacheKey, museums);
-      setMuseums(museums);
-      setDisplayedMuseums(museums.slice(0, 10));
-      setHasMore(museums.length > 10);
-    } catch (e) {
-      setMuseums([]);
-      setDisplayedMuseums([]);
-      setHasMore(false);
-    } finally {
-      setLoadingMuseums(false);
-    }
-  };
-
-  // 이름으로 전역 검색 (기존 fetchMuseums)
-  const fetchMuseumsByName = async (name: string) => {
-    setLoadingMuseums(true);
-    setPage(1);
-    const cacheKey = `name_${name}`;
-    const cachedData = getCachedData(cacheKey);
-    if (cachedData) {
-      setMuseums(cachedData);
-      setDisplayedMuseums(cachedData.slice(0, 10));
-      setHasMore(cachedData.length > 10);
-      setLoadingMuseums(false);
-      return;
-    }
-    const query = `
-      [out:json][timeout:25];
-      (
-        nwr["tourism"~"museum|art_gallery"]["name"~"${name}",i];
-        nwr["historic"~"memorial|archaeological_site|monument|yes"]["name"~"${name}",i];
-      );
-      out center tags 100;
-    `;
-    try {
-      const response = await fetch('https://overpass-api.de/api/interpreter', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `data=${encodeURIComponent(query)}`,
-      });
-      if (!response.ok) throw new Error('API 요청 실패');
-      const json = await response.json();
-      const uniqueMuseums = new Map<string, Museum>();
-      (json.elements || []).forEach((el: any) => {
-        if (!el.lat || !el.lon) return;
-        const key = `${el.lat}_${el.lon}`;
-        if (!uniqueMuseums.has(key)) {
-          uniqueMuseums.set(key, {
-            id: String(el.id),
-            name: el.tags?.name || '이름 없음',
-            lat: el.lat || el.center?.lat,
-            lon: el.lon || el.center?.lon,
-            address: el.tags?.['addr:full'] || el.tags?.['addr:street'] || '',
-          });
-        }
-      });
-      const museums = Array.from(uniqueMuseums.values());
+      // 결과가 없고, 확장 횟수가 3회 미만이면 bbox를 2배로 확장해서 재귀 호출
+      if (museums.length === 0 && expandCount < 3) {
+        const expandedRegion = {
+          ...region,
+          latitudeDelta: region.latitudeDelta * 2,
+          longitudeDelta: region.longitudeDelta * 2,
+        };
+        fetchMuseumsInRegion(expandedRegion, nameFilter, expandCount + 1);
+        return;
+      }
       cacheData(cacheKey, museums);
       setMuseums(museums);
       setDisplayedMuseums(museums.slice(0, 10));
@@ -273,12 +228,11 @@ const MapScreen = () => {
     }
   };
 
-  // 이름 검색 입력 시 전역 검색
+  // 이름 검색 입력 시 지도범위 내에서만 검색
   useEffect(() => {
     if (searchText.trim() !== '') {
-      fetchMuseumsByName(searchText.trim());
+      fetchMuseumsInRegion(region, searchText.trim());
     } else {
-      // 검색어가 비어있으면 현재 region 기준으로 지도범위 검색
       fetchMuseumsInRegion(region);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
