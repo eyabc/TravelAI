@@ -214,18 +214,14 @@ const MapScreen = () => {
     }
   };
 
-  // 지도 이동 시 박물관 검색 및 줌 레벨 업데이트
-  const handleRegionChangeComplete = (reg: Region) => {
+  // 지도 이동 시마다 타일 다운로드 및 POI 표시
+  const handleRegionChangeComplete = async (reg: Region) => {
     setRegion(reg);
-    const zl = getZoomLevel(reg.latitudeDelta);
-    setZoomLevel(zl);
-    // 이름 검색이 비어있을 때만 지도범위 검색
-    if (zl >= 13 && searchText.trim() === '') {
-      fetchMuseumsInRegion(reg);
-    } else if (zl < 13) {
-      setMuseums([]);
-      setDisplayedMuseums([]);
-    }
+    setZoomLevel(getZoomLevel(reg.latitudeDelta));
+    setLoadingMuseums(true);
+    const pois = await getPOIsForRegion(reg);
+    setMuseums(pois);
+    setLoadingMuseums(false);
   };
 
   // 이름 검색 입력 시 지도범위 내에서만 검색
