@@ -37,8 +37,9 @@ jobs:
         run: |
           python3 scripts/extract_poi_tiles.py poi_museums.osm tiles
 
-      - name: List tiles directory
-        run: ls -l tiles || (echo "tiles directory not found" && exit 1)
+      - name: Move tiles to temp
+        run: |
+          mv tiles /tmp/tiles
 
       - name: Checkout poi-tiles branch (or create if not exists)
         run: |
@@ -49,7 +50,7 @@ jobs:
 
       - name: Copy new tiles to branch
         run: |
-          cp -r $GITHUB_WORKSPACE/tiles ./tiles
+          cp -r /tmp/tiles ./tiles
           
       - name: Commit and push tiles
         run: |
