@@ -49,7 +49,7 @@ jobs:
           git checkout poi-tiles || git checkout --orphan poi-tiles
       
           # 안전하게 모든 파일 삭제 (.git은 제외)
-          find . -mindepth 1 -not -name '.git' -exec rm -rf {} +
+          find . -mindepth 1 -not -name '.git' -not -path './.git/*' -exec rm -rf {} +
       
           # 작업 디렉토리가 비었는지 확인
           echo "Current directory contents:"
