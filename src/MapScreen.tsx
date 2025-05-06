@@ -1,17 +1,14 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { View, StyleSheet, Dimensions, Alert, Platform, PermissionsAndroid, TouchableOpacity, Text, FlatList, ActivityIndicator } from 'react-native';
-import MapView, { Marker, MapPressEvent, Region, UrlTile } from 'react-native-maps';
+import MapView, { Marker, Region, UrlTile } from 'react-native-maps';
 import Geolocation from '@react-native-community/geolocation';
+import Ionicons from 'react-native-vector-icons/Ionicons';
+import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
 
 const { width, height } = Dimensions.get('window');
 
 const MIN_DELTA = 0.002;
 const MAX_DELTA = 1.5;
-
-interface MarkerData {
-  latitude: number;
-  longitude: number;
-}
 
 interface Museum {
   id: string;
@@ -21,6 +18,9 @@ interface Museum {
   address?: string;
 }
 
+const LABEL_TILE = "http://c.tile.openstreetmap.org/{z}/{x}/{y}.png";
+const NO_LABEL_TILE = "https://cartodb-basemaps-a.global.ssl.fastly.net/light_nolabels/{z}/{x}/{y}.png";
+
 const MapScreen = () => {
   const [region, setRegion] = useState<Region>({
     latitude: 37.5665,
@@ -28,11 +28,19 @@ const MapScreen = () => {
     latitudeDelta: 0.05,
     longitudeDelta: 0.05,
   });
-  const [markers, setMarkers] = useState<MarkerData[]>([]);
-  const [currentLocation, setCurrentLocation] = useState<MarkerData | null>(null);
+  const [currentLocation, setCurrentLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [museums, setMuseums] = useState<Museum[]>([]);
   const [loadingMuseums, setLoadingMuseums] = useState(false);
+  const [showLabels, setShowLabels] = useState(true);
   const mapRef = useRef<MapView>(null);
+  const [currentScale, setCurrentScale] = useState(region.latitudeDelta);
+
+  // latitudeDelta -> zoom level 변환 함수
+  const getZoomLevel = (latDelta: number) => {
+    // 구글/OSM 기준 대략적 변환 공식
+    return Math.round(Math.log2(360 / latDelta));
+  };
+  const [zoomLevel, setZoomLevel] = useState(getZoomLevel(region.latitudeDelta));
 
   useEffect(() => {
     const requestLocationPermission = async () => {
@@ -127,19 +135,16 @@ const MapScreen = () => {
     }
   };
 
-  // 지도 이동 시 박물관 검색
+  // 지도 이동 시 박물관 검색 및 줌 레벨 업데이트
   const handleRegionChangeComplete = (reg: Region) => {
     setRegion(reg);
-    fetchMuseums(reg);
-  };
-
-  const handleMapPress = (e: MapPressEvent) => {
-    const { latitude, longitude } = e.nativeEvent.coordinate;
-    setMarkers(prev => [...prev, { latitude, longitude }]);
-  };
-
-  const handleMarkerPress = (marker: MarkerData, idx: number) => {
-    Alert.alert('마커', `위도: ${marker.latitude}\n경도: ${marker.longitude}`);
+    const zl = getZoomLevel(reg.latitudeDelta);
+    setZoomLevel(zl);
+    if (zl >= 13) {
+      fetchMuseums(reg);
+    } else {
+      setMuseums([]); // 줌 레벨이 낮으면 박물관 마커/리스트 모두 숨김
+    }
   };
 
   const handleMuseumMarkerPress = (museum: Museum) => {
@@ -189,13 +194,12 @@ const MapScreen = () => {
         region={region}
         showsUserLocation={!!currentLocation}
         showsMyLocationButton={false}
-        onPress={handleMapPress}
         onRegionChangeComplete={handleRegionChangeComplete}
         minZoomLevel={1}
         maxZoomLevel={20}
       >
         <UrlTile
-          urlTemplate="http://c.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          urlTemplate={showLabels ? LABEL_TILE : NO_LABEL_TILE}
           maximumZ={19}
           flipY={false}
         />
@@ -205,16 +209,9 @@ const MapScreen = () => {
             title="현재 위치"
             description="여기에 있습니다."
             pinColor="blue"
-            onPress={() => handleMarkerPress(currentLocation, -1)}
+            onPress={() => Alert.alert('현재 위치', '여기에 있습니다.')}
           />
         )}
-        {markers.map((marker, idx) => (
-          <Marker
-            key={idx}
-            coordinate={marker}
-            onPress={() => handleMarkerPress(marker, idx)}
-          />
-        ))}
         {museums.map((museum) => (
           <Marker
             key={museum.id}
@@ -226,15 +223,21 @@ const MapScreen = () => {
           />
         ))}
       </MapView>
-      <View style={styles.zoomContainer}>
-        <TouchableOpacity style={styles.zoomButton} onPress={() => handleZoom('in')}>
-          <Text style={styles.zoomText}>＋</Text>
+      <View style={styles.mapFabRoot}>
+        <TouchableOpacity style={styles.locateBtn} onPress={moveToCurrentLocation}>
+          <Text style={styles.emoji}>🧭</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.zoomButton} onPress={() => handleZoom('out')}>
-          <Text style={styles.zoomText}>－</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.locationButton} onPress={moveToCurrentLocation}>
-          <Text style={styles.locationText}>내 위치</Text>
+        <View style={styles.zoomGroup}>
+          <TouchableOpacity style={styles.zoomBtn} onPress={() => handleZoom('in')}>
+            <Text style={styles.emoji}>➕</Text>
+          </TouchableOpacity>
+          <View style={styles.zoomDivider} />
+          <TouchableOpacity style={styles.zoomBtn} onPress={() => handleZoom('out')}>
+            <Text style={styles.emoji}>➖</Text>
+          </TouchableOpacity>
+        </View>
+        <TouchableOpacity style={styles.locateBtn} onPress={() => setShowLabels(v => !v)}>
+          <Text style={styles.emoji}>{showLabels ? '👁️' : '🚫👁️'}</Text>
         </TouchableOpacity>
       </View>
       <View style={styles.museumListContainer}>
@@ -268,6 +271,9 @@ const MapScreen = () => {
           />
         )}
       </View>
+      <View style={styles.zoomInfo}>
+        <Text style={styles.zoomText}>줌 레벨: {zoomLevel}</Text>
+      </View>
     </View>
   );
 };
@@ -280,46 +286,55 @@ const styles = StyleSheet.create({
     width: width,
     height: height,
   },
-  zoomContainer: {
+  mapFabRoot: {
     position: 'absolute',
-    right: 20,
-    bottom: 100,
-    flexDirection: 'column',
-    gap: 10,
+    right: 18,
+    bottom: 110,
     alignItems: 'center',
+    zIndex: 10,
   },
-  zoomButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: 'rgba(255,255,255,0.9)',
+  locateBtn: {
+    width: 52,
+    height: 52,
+    borderRadius: 16,
+    backgroundColor: '#fff',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 10,
+    marginBottom: 14,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 2,
+    shadowOpacity: 0.12,
+    shadowRadius: 4,
     elevation: 2,
   },
-  zoomText: {
-    fontSize: 28,
-    color: '#007AFF',
-    fontWeight: 'bold',
-  },
-  locationButton: {
-    width: 64,
-    height: 32,
+  zoomGroup: {
+    backgroundColor: '#fff',
     borderRadius: 16,
-    backgroundColor: '#007AFF',
+    paddingVertical: 2,
+    paddingHorizontal: 0,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 4,
+    elevation: 2,
+    marginBottom: 14,
+  },
+  zoomBtn: {
+    width: 52,
+    height: 44,
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 10,
   },
-  locationText: {
-    color: '#fff',
-    fontSize: 15,
-    fontWeight: 'bold',
+  zoomDivider: {
+    width: 32,
+    height: 1,
+    backgroundColor: '#eee',
+    marginVertical: 2,
+  },
+  emoji: {
+    fontSize: 28,
+    textAlign: 'center',
   },
   museumListContainer: {
     position: 'absolute',
@@ -348,6 +363,25 @@ const styles = StyleSheet.create({
     color: '#333',
     fontWeight: 'bold',
     fontSize: 15,
+  },
+  zoomInfo: {
+    position: 'absolute',
+    left: 18,
+    bottom: 110,
+    backgroundColor: 'rgba(255,255,255,0.85)',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  zoomText: {
+    color: '#333',
+    fontSize: 14,
+    fontWeight: 'bold',
   },
 });
 
