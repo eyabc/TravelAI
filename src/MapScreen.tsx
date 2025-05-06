@@ -1,9 +1,10 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { View, StyleSheet, Dimensions, Alert, Platform, PermissionsAndroid, TouchableOpacity, Text, FlatList, ActivityIndicator, Modal } from 'react-native';
+import { View, StyleSheet, Dimensions, Alert, Platform, PermissionsAndroid, TouchableOpacity, Text, FlatList, ActivityIndicator, Modal, Animated, Linking } from 'react-native';
 import MapView, { Marker, Region, UrlTile } from 'react-native-maps';
 import Geolocation from '@react-native-community/geolocation';
 import Ionicons from 'react-native-vector-icons/Ionicons';
 import MaterialIcons from 'react-native-vector-icons/MaterialIcons';
+import { WebView } from 'react-native-webview';
 
 const { width, height } = Dimensions.get('window');
 
@@ -23,8 +24,8 @@ const NO_LABEL_TILE = "https://cartodb-basemaps-a.global.ssl.fastly.net/light_no
 
 const MapScreen = () => {
   const [region, setRegion] = useState<Region>({
-    latitude: 37.5665,
-    longitude: 126.9780,
+    latitude: 37.523984,
+    longitude: 126.980355,
     latitudeDelta: 0.05,
     longitudeDelta: 0.05,
   });
@@ -35,6 +36,9 @@ const MapScreen = () => {
   const mapRef = useRef<MapView>(null);
   const [currentScale, setCurrentScale] = useState(region.latitudeDelta);
   const [showList, setShowList] = useState(false);
+  const [ticker, setTicker] = useState<string | null>(null);
+  const tickerAnim = useRef(new Animated.Value(0)).current;
+  const [webviewUrl, setWebviewUrl] = useState<string | null>(null);
 
   // latitudeDelta -> zoom level 변환 함수
   const getZoomLevel = (latDelta: number) => {
@@ -101,7 +105,7 @@ const MapScreen = () => {
     };
   };
 
-  // Overpass API로 박물관 검색
+  // Overpass API로 박물관/미술관/기념관/유적지 등 검색
   const fetchMuseums = async (region: Region) => {
     setLoadingMuseums(true);
     const bbox = getBoundingBox(region);
@@ -111,6 +115,21 @@ const MapScreen = () => {
         node["tourism"="museum"](${bbox.s},${bbox.w},${bbox.n},${bbox.e});
         way["tourism"="museum"](${bbox.s},${bbox.w},${bbox.n},${bbox.e});
         relation["tourism"="museum"](${bbox.s},${bbox.w},${bbox.n},${bbox.e});
+        node["tourism"="art_gallery"](${bbox.s},${bbox.w},${bbox.n},${bbox.e});
+        way["tourism"="art_gallery"](${bbox.s},${bbox.w},${bbox.n},${bbox.e});
+        relation["tourism"="art_gallery"](${bbox.s},${bbox.w},${bbox.n},${bbox.e});
+        node["historic"="memorial"](${bbox.s},${bbox.w},${bbox.n},${bbox.e});
+        way["historic"="memorial"](${bbox.s},${bbox.w},${bbox.n},${bbox.e});
+        relation["historic"="memorial"](${bbox.s},${bbox.w},${bbox.n},${bbox.e});
+        node["historic"="archaeological_site"](${bbox.s},${bbox.w},${bbox.n},${bbox.e});
+        way["historic"="archaeological_site"](${bbox.s},${bbox.w},${bbox.n},${bbox.e});
+        relation["historic"="archaeological_site"](${bbox.s},${bbox.w},${bbox.n},${bbox.e});
+        node["historic"="monument"](${bbox.s},${bbox.w},${bbox.n},${bbox.e});
+        way["historic"="monument"](${bbox.s},${bbox.w},${bbox.n},${bbox.e});
+        relation["historic"="monument"](${bbox.s},${bbox.w},${bbox.n},${bbox.e});
+        node["historic"="yes"](${bbox.s},${bbox.w},${bbox.n},${bbox.e});
+        way["historic"="yes"](${bbox.s},${bbox.w},${bbox.n},${bbox.e});
+        relation["historic"="yes"](${bbox.s},${bbox.w},${bbox.n},${bbox.e});
       );
       out center tags;
     `;
@@ -148,8 +167,14 @@ const MapScreen = () => {
     }
   };
 
+  // 박물관 마커 클릭 시 ticker 표시
   const handleMuseumMarkerPress = (museum: Museum) => {
-    Alert.alert(museum.name, museum.address || '');
+    setTicker(museum.name);
+    Animated.sequence([
+      Animated.timing(tickerAnim, { toValue: 1, duration: 200, useNativeDriver: true }),
+      Animated.delay(1800),
+      Animated.timing(tickerAnim, { toValue: 0, duration: 300, useNativeDriver: true }),
+    ]).start(() => setTicker(null));
   };
 
   const handleZoom = (type: 'in' | 'out') => {
@@ -275,11 +300,13 @@ const MapScreen = () => {
       <View style={styles.zoomInfo}>
         <Text style={styles.zoomText}>줌 레벨: {zoomLevel}</Text>
       </View>
-      <View style={styles.listButtonContainer}>
-        <TouchableOpacity style={styles.listButton} onPress={() => setShowList(true)}>
-          <Text style={styles.listButtonText}>📋 목록보기</Text>
-        </TouchableOpacity>
-      </View>
+      {museums.length > 0 && (
+        <View style={styles.listButtonContainer}>
+          <TouchableOpacity style={styles.listButton} onPress={() => setShowList(true)}>
+            <Text style={styles.listButtonText}>📋 목록보기</Text>
+          </TouchableOpacity>
+        </View>
+      )}
       <Modal
         visible={showList}
         animationType="slide"
@@ -312,7 +339,6 @@ const MapScreen = () => {
                           longitudeDelta: region.longitudeDelta,
                         }, 500);
                       }
-                      handleMuseumMarkerPress(item);
                     }}
                   >
                     <Text style={styles.modalMuseumName}>{item.name}</Text>
@@ -324,6 +350,34 @@ const MapScreen = () => {
               />
             )}
           </View>
+        </View>
+      </Modal>
+      {/* Ticker */}
+      {ticker && (
+        <Animated.View style={[styles.ticker, { opacity: tickerAnim, transform: [{ translateY: tickerAnim.interpolate({ inputRange: [0, 1], outputRange: [30, 0] }) }] }] }>
+          <Text style={styles.tickerText}>{ticker}</Text>
+          <TouchableOpacity
+            style={styles.tickerIconBtn}
+            onPress={() => {
+              if (ticker) {
+                const url = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(ticker)}`;
+                setWebviewUrl(url);
+              }
+            }}
+          >
+            <Text style={styles.tickerIcon}>🗺️</Text>
+          </TouchableOpacity>
+        </Animated.View>
+      )}
+      {/* WebView 모달 */}
+      <Modal visible={!!webviewUrl} animationType="slide" onRequestClose={() => setWebviewUrl(null)}>
+        <View style={{ flex: 1 }}>
+          <TouchableOpacity style={styles.webviewClose} onPress={() => setWebviewUrl(null)}>
+            <Text style={styles.webviewCloseText}>닫기</Text>
+          </TouchableOpacity>
+          {webviewUrl && (
+            <WebView source={{ uri: webviewUrl }} style={{ flex: 1, marginTop: 60 }} />
+          )}
         </View>
       </Modal>
     </View>
@@ -497,6 +551,58 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#888',
     marginTop: 2,
+  },
+  ticker: {
+    position: 'absolute',
+    top: 60,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+    zIndex: 100,
+    flexDirection: 'row',
+    justifyContent: 'center',
+  },
+  tickerText: {
+    backgroundColor: 'rgba(0,0,0,0.85)',
+    color: '#fff',
+    fontSize: 17,
+    fontWeight: 'bold',
+    paddingHorizontal: 22,
+    paddingVertical: 10,
+    borderRadius: 22,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.18,
+    shadowRadius: 4,
+    elevation: 3,
+    marginRight: 8,
+  },
+  tickerIconBtn: {
+    padding: 4,
+  },
+  tickerIcon: {
+    fontSize: 22,
+  },
+  webviewClose: {
+    position: 'absolute',
+    top: 40,
+    right: 20,
+    zIndex: 10,
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  webviewCloseText: {
+    color: '#007AFF',
+    fontWeight: 'bold',
+    fontSize: 16,
   },
 });
 
