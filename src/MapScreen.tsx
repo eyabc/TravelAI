@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { View, StyleSheet, Dimensions, Alert, Platform, PermissionsAndroid, TouchableOpacity, Text, FlatList, ActivityIndicator } from 'react-native';
+import { View, StyleSheet, Dimensions, Alert, Platform, PermissionsAndroid, TouchableOpacity, Text, FlatList, ActivityIndicator, Modal } from 'react-native';
 import MapView, { Marker, Region, UrlTile } from 'react-native-maps';
 import Geolocation from '@react-native-community/geolocation';
 import Ionicons from 'react-native-vector-icons/Ionicons';
@@ -34,6 +34,7 @@ const MapScreen = () => {
   const [showLabels, setShowLabels] = useState(true);
   const mapRef = useRef<MapView>(null);
   const [currentScale, setCurrentScale] = useState(region.latitudeDelta);
+  const [showList, setShowList] = useState(false);
 
   // latitudeDelta -> zoom level 변환 함수
   const getZoomLevel = (latDelta: number) => {
@@ -274,6 +275,57 @@ const MapScreen = () => {
       <View style={styles.zoomInfo}>
         <Text style={styles.zoomText}>줌 레벨: {zoomLevel}</Text>
       </View>
+      <View style={styles.listButtonContainer}>
+        <TouchableOpacity style={styles.listButton} onPress={() => setShowList(true)}>
+          <Text style={styles.listButtonText}>📋 목록보기</Text>
+        </TouchableOpacity>
+      </View>
+      <Modal
+        visible={showList}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setShowList(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <TouchableOpacity style={styles.closeButton} onPress={() => setShowList(false)}>
+              <Text style={styles.closeButtonText}>⬇️ 닫기</Text>
+            </TouchableOpacity>
+            {loadingMuseums ? (
+              <ActivityIndicator size="small" color="#007AFF" style={{ margin: 10 }} />
+            ) : museums.length === 0 ? (
+              <Text style={{ textAlign: 'center', color: '#888', margin: 20 }}>박물관이 없습니다.</Text>
+            ) : (
+              <FlatList
+                data={museums}
+                keyExtractor={item => item.id}
+                renderItem={({ item }) => (
+                  <TouchableOpacity
+                    style={styles.modalMuseumItem}
+                    onPress={() => {
+                      setShowList(false);
+                      if (mapRef.current) {
+                        mapRef.current.animateToRegion({
+                          latitude: item.lat,
+                          longitude: item.lon,
+                          latitudeDelta: region.latitudeDelta,
+                          longitudeDelta: region.longitudeDelta,
+                        }, 500);
+                      }
+                      handleMuseumMarkerPress(item);
+                    }}
+                  >
+                    <Text style={styles.modalMuseumName}>{item.name}</Text>
+                    {item.address ? (
+                      <Text style={styles.modalMuseumAddr}>{item.address}</Text>
+                    ) : null}
+                  </TouchableOpacity>
+                )}
+              />
+            )}
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -382,6 +434,69 @@ const styles = StyleSheet.create({
     color: '#333',
     fontSize: 14,
     fontWeight: 'bold',
+  },
+  listButtonContainer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 30,
+    alignItems: 'center',
+    zIndex: 20,
+  },
+  listButton: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    paddingHorizontal: 22,
+    paddingVertical: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 2,
+    elevation: 1,
+  },
+  listButtonText: {
+    fontSize: 17,
+    color: '#007AFF',
+    fontWeight: 'bold',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.18)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+    paddingTop: 12,
+    paddingBottom: 24,
+    paddingHorizontal: 18,
+    minHeight: 180,
+    maxHeight: '60%',
+  },
+  closeButton: {
+    alignSelf: 'center',
+    marginBottom: 10,
+  },
+  closeButtonText: {
+    fontSize: 18,
+    color: '#007AFF',
+    fontWeight: 'bold',
+  },
+  modalMuseumItem: {
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+  },
+  modalMuseumName: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#222',
+  },
+  modalMuseumAddr: {
+    fontSize: 13,
+    color: '#888',
+    marginTop: 2,
   },
 });
 
