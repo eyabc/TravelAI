@@ -8,6 +8,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # 👉 push 하기 위해 write 권한 필요
     steps:
       - name: Checkout main branch
         uses: actions/checkout@v3
