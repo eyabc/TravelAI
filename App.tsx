@@ -59,7 +59,7 @@ function LoginScreen({ navigation }: any): React.JSX.Element {
   const handleLogin = () => {
     navigation.replace('Map');
   };
-
+  
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" />
@@ -108,9 +108,9 @@ function LoginScreen({ navigation }: any): React.JSX.Element {
           </View>
 
           <TouchableOpacity style={styles.loginButton} onPress={handleLogin}>
-            <Text style={styles.loginButtonText}>로그인</Text>
+            <Text style={styles.loginButtonText}>지도 모드</Text>
           </TouchableOpacity>
-
+          
           <TouchableOpacity style={styles.signupButton}>
             <Text style={styles.signupButtonText}>계정이 없으신가요? 회원가입</Text>
           </TouchableOpacity>

@@ -219,8 +219,7 @@ const MapScreen = () => {
     setRegion(reg);
     setZoomLevel(getZoomLevel(reg.latitudeDelta));
     setLoadingMuseums(true);
-    const pois = await getPOIsForRegion(reg);
-    setMuseums(pois);
+    await fetchMuseumsInRegion(reg, searchText.trim());
     setLoadingMuseums(false);
   };
 
