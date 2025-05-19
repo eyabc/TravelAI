@@ -1,0 +1,50 @@
+// 📦 YAML 기반 큐레이션 프롬프트 로더
+// 사용자의 영어 입력과 정의된 규칙을 매칭하여 GPT용 프롬프트를 반환합니다.
+
+import * as fs from 'fs';
+import * as path from 'path';
+import * as yaml from 'js-yaml';
+
+type PromptRule = {
+  if_input: string;
+  then_gpt_prompt: string;
+};
+
+type CurationPromptSet = {
+  prompts: PromptRule[];
+  metadata?: {
+    version?: string;
+    updated_at?: string;
+  };
+};
+
+export class CurationPromptLoader {
+  private prompts: PromptRule[] = [];
+
+  constructor(yamlFilePath: string) {
+    const file = fs.readFileSync(path.resolve(yamlFilePath), 'utf8');
+    const parsed = yaml.load(file) as CurationPromptSet;
+    this.prompts = parsed.prompts || [];
+  }
+
+  /**
+   * 영어로 번역된 사용자 입력과 가장 잘 맞는 프롬프트 규칙을 찾는다.
+   * @param englishInput 사용자 입력 (이미 영어로 번역됨)
+   */
+  findPrompt(englishInput: string): string | null {
+    const normalizedInput = englishInput.toLowerCase().trim();
+
+    for (const rule of this.prompts) {
+      if (normalizedInput.includes(rule.if_input.toLowerCase())) {
+        return rule.then_gpt_prompt;
+      }
+    }
+
+    return null;
+  }
+}
+
+// 사용 예시:
+// const loader = new CurationPromptLoader('config/curation-prompts/default.yaml');
+// const prompt = loader.findPrompt("I'm traveling alone");
+// console.log(prompt);

@@ -1,0 +1,82 @@
+# 📘 Curation Prompt Rules (여행 큐레이션 규칙 정의 문서)
+
+이 문서는 TravelAI의 AI 기반 여행 큐레이션 기능에서 사용하는 YAML 기반 프롬프트 규칙을 정의하고 관리하는 방식에 대해 설명합니다.
+
+---
+
+## 📦 목적
+
+- 사용자 입력 유형에 따라 AI에게 전달할 시스템 프롬프트를 분기 처리
+- 초기에는 YAML 파일로 관리하며, 이후 어드민 UI 확장 고려
+- 규칙은 영어 기준으로 작성되며, 입력/응답은 번역 시스템과 연계
+
+---
+
+## 🧾 YAML 구조 예시
+
+```yaml
+prompts:
+  - if_input: "I'm traveling alone"
+    then_gpt_prompt: |
+      The user is traveling solo. Recommend safe and quiet places ideal for solo travelers.
+
+  - if_input: "Any good local food places?"
+    then_gpt_prompt: |
+      The user is looking for authentic local eateries. Avoid tourist traps.
+
+  - if_input: "Any kid-friendly places?"
+    then_gpt_prompt: |
+      The user is traveling with children. Prioritize safety and entertainment suitable for kids.
+
+metadata:
+  version: 1.0
+  updated_at: "2025-05-17"
+```
+
+---
+
+## 🛠️ 매칭 로직
+
+- 입력값은 영어로 번역된 후, `if_input` 값과 **부분 일치 포함 여부**로 매칭
+- 다국어 입력 → 영어 번역 → 규칙 매칭 → GPT 호출 → 응답 번역 → 출력
+
+---
+
+## 🌍 다국어 처리 전략
+
+- 모든 `if_input`은 영어로 정의
+- 사용자 입력은 번역된 뒤 규칙과 비교
+- 결과 응답도 영어 → 사용자 언어로 재번역되어 제공됨
+- 자세한 전략은 `curation-i18n-strategy.md` 참고
+
+---
+
+## 🧩 규칙 관리 전략
+
+- 초기에는 YAML 파일로 구성하여 Git 버전 관리 가능
+- 디렉터리 예시:
+  ```
+  config/
+    curation-prompts/
+      default.yaml
+      korea.yaml
+      family.yaml
+  ```
+- 추후 DB 기반 어드민 페이지 연동으로 CRUD 가능하게 확장
+
+---
+
+## 🔍 향후 확장 포인트
+
+| 항목 | 설명 |
+|------|------|
+| 규칙 태깅 | "혼자", "아이동반", "맛집" 등 주제 태그 추가 |
+| 우선순위 적용 | 중복 매칭 시 우선순위 높은 규칙 우선 적용 |
+| 조건식 확장 | 키워드 포함 외 정규표현식, NLP 유사도 매칭 등 도입 |
+| 사용 통계 기반 | 자주 매칭되는 규칙 우선 정렬, 로그 기반 추천 보완 |
+
+---
+
+## ✅ 결론
+
+이 프롬프트 규칙 시스템은 GPT 응답의 일관성과 품질을 유지하기 위한 핵심 구성 요소입니다. 초기에 YAML 기반으로 가볍게 시작하여, 운영 규모에 따라 DB + UI 기반으로 확장 가능합니다.

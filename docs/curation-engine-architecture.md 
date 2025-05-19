@@ -1,0 +1,114 @@
+# 🧠 TravelAI - Curation Engine Architecture
+
+이 문서는 TravelAI의 AI 기반 여행 큐레이션 기능의 전체 처리 흐름과 컴포넌트 구조를 설명합니다.
+
+---
+
+## 🎯 목적
+
+- 사용자의 다국어 입력을 일관성 있게 분석하고, GPT 기반으로 개인화된 여행 큐레이션을 제공
+- YAML 기반 규칙에 따라 GPT에게 정확한 프롬프트를 제공하여 일관된 품질의 응답 유도
+
+---
+
+## 🧩 주요 컴포넌트 구조
+
+```txt
++------------------------+
+|  User Input (다국어)  |
++------------------------+
+            ⬇
++------------------------+
+| TranslationService     | 🔁 입력 → 영어
++------------------------+
+            ⬇
++------------------------+
+| CurationPromptLoader   | 🔍 YAML 규칙 매칭
++------------------------+
+            ⬇
++------------------------+
+| CurationEngineService  | 🧠 GPT 프롬프트 구성 및 호출
++------------------------+
+            ⬇
++------------------------+
+| TranslationService     | 🔁 영어 응답 → 사용자 언어
++------------------------+
+            ⬇
++------------------------+
+| Response to User       |
++------------------------+
+```
+
+---
+
+## ⚙️ 처리 흐름 요약
+
+1. 사용자의 **다국어 입력 수신**
+2. `TranslationService`가 입력을 **영어로 번역**
+3. 영어 입력을 기반으로 `CurationPromptLoader`가 **규칙 매칭**
+4. `CurationEngineService`가 **GPT system/user 프롬프트 생성**
+5. GPT 응답(영어)을 다시 **사용자 언어로 번역**
+6. 최종 큐레이션 응답 출력
+
+---
+
+## 📁 주요 파일/클래스 구조
+
+```
+src/
+  curation/
+    curation-engine.service.ts     🧠 GPT 호출 및 응답 관리
+    curation-prompt-loader.ts      📖 YAML 기반 프롬프트 규칙 로더
+    dto/
+      CurationRequestDto.ts        📥 사용자 요청 DTO
+      CurationResponseDto.ts       📤 GPT 응답 DTO
+  translation/
+    translation.service.ts         🔁 번역 처리
+```
+
+---
+
+## 🔐 의존성 및 DI 설계
+
+- `CurationEngineService`는 다음 컴포넌트를 의존성 주입으로 사용:
+  - `TranslationService`
+  - `CurationPromptLoader`
+  - `GptService` (또는 `GptClient`)
+
+```ts
+@Injectable()
+export class CurationEngineService {
+  constructor(
+    private readonly translation: TranslationService,
+    private readonly prompts: CurationPromptLoader,
+    private readonly gpt: GptService
+  ) {}
+}
+```
+
+---
+
+## 🧪 테스트 포인트
+
+- 입력 → 영어 변환 확인
+- YAML 규칙 매칭 정확도
+- GPT 호출 시 올바른 프롬프트 생성 여부
+- 영어 응답 → 사용자 언어 번역 테스트
+- 캐시 또는 fallback 정책 적용 여부
+
+---
+
+## 🔮 향후 확장
+
+| 확장 항목 | 설명 |
+|-----------|------|
+| 어드민 CRUD | YAML → DB로 전환 후 관리자 규칙 편집 |
+| 규칙 태깅 | "혼자 여행", "맛집" 등 카테고리 분류 지원 |
+| 다중 프롬프트 엔진 | GPT 외 Deepl, Claude 등 추가 |
+| 사용자 맞춤 필터 | 여행자 선호 (가격, 경로, 스타일)에 따라 응답 다르게 출력 |
+
+---
+
+## ✅ 결론
+
+이 구조는 **다국어 대응**, **규칙 기반 개인화**, **GPT 통합**을 모두 만족하며, 향후 확장성과 품질 유지가 용이한 엔터프라이즈 설계입니다.
